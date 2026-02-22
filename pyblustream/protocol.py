@@ -102,7 +102,7 @@ class MatrixProtocol(asyncio.Protocol):
         while True:
             await asyncio.sleep(self._heartbeat_time)
             self._logger.debug("heartbeat")
-            self._data_send("\n")
+            self._data_send("\r\n")
 
     async def _wait_to_reconnect(self):
         # TODO with the new async_connect I think we can make this much easier - but I can't test right now
@@ -219,11 +219,11 @@ class MatrixProtocol(asyncio.Protocol):
         self._logger.info(
             f"Sending Output source change message - Output: {output_id} changed to input: {input_id}"
         )
-        self._data_send(f"out{output_id:02d}fr{input_id:02d}\r")
+        self._data_send(f"out{output_id:02d}fr{input_id:02d}\r\n")
 
     def send_status_message(self):
         self._logger.info(f"Sending status change message")
-        self._data_send("STATUS\r")
+        self._data_send("STATUS\r\n")
 
     def get_status_of_output(self, output_id: int) -> Optional[int]:
         return self._output_to_input_map.get(output_id, None)
@@ -239,10 +239,10 @@ class MatrixProtocol(asyncio.Protocol):
         return self._matrix_on
 
     def send_turn_on_message(self):
-        self._data_send(f"PON\r")
+        self._data_send(f"PON\r\n")
 
     def send_turn_off_message(self):
-        self._data_send(f"POFF\r")
+        self._data_send(f"POFF\r\n")
 
     def send_guest_command(self, guest_is_input, guest_id, command):
         prefix = "IN" if guest_is_input else "OUT"
@@ -251,3 +251,44 @@ class MatrixProtocol(asyncio.Protocol):
         rn = "\r\n".encode("ASCII")
         full_command = open_command + rn + command + rn + close_command + rn
         self._transport.write(full_command)
+
+
+class ACM1000Protocol(MatrixProtocol):
+    """Protocol for ACM1000 devices with different command format."""
+
+    def send_change_source(self, input_id: int, output_id: int):
+        """Send source change command in ACM1000 format."""
+        self._logger.info(
+            f"Sending Output source change message - Output: {output_id} changed to input: {input_id}"
+        )
+        # ACM1000 uses uppercase with 3 digits and spaces: "OUT 001 FR 002\r\n"
+        self._data_send(f"OUT {output_id:03d} FR {input_id:03d}\r\n")
+
+    def send_output_power(self, output_id: int, power_on: bool):
+        """Send per-output power command (ACM1000 only)."""
+        state = "ON" if power_on else "OFF"
+        self._logger.info(f"Sending Output power message - Output: {output_id} set to {state}")
+        self._data_send(f"OUT {output_id:03d} {state}\r\n")
+
+    def send_turn_on_message(self):
+        """ACM1000 does not support system power - raise error."""
+        self._logger.warning("ACM1000 does not support system power control")
+        raise NotImplementedError("ACM1000 does not have system-level power control")
+
+    def send_turn_off_message(self):
+        """ACM1000 does not support system power - raise error."""
+        self._logger.warning("ACM1000 does not support system power control")
+        raise NotImplementedError("ACM1000 does not have system-level power control")
+
+    def send_macro(self, macro_index: int):
+        """Trigger macro with specified index."""
+        self._logger.info(f"Triggering macro {macro_index}")
+        self._data_send(f"MACRO {macro_index:02d}\r\n")
+
+    async def _heartbeat(self):
+        """ACM1000 keepalive using empty line."""
+        # ACM1000 accepts empty line (CR+LF) as keepalive without error
+        while True:
+            await asyncio.sleep(self._heartbeat_time)
+            self._logger.debug("Sending keepalive")
+            self._data_send("\r\n")

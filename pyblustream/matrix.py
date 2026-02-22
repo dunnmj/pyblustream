@@ -5,12 +5,57 @@ from pyblustream.listener import MultiplexingListener
 from pyblustream.protocol import MatrixProtocol
 import xmltodict
 
+
+async def detect_device_type(hostname: str) -> str:
+    """Detect device type by trying both metadata endpoints.
+
+    Returns: 'acm1000', 'acm200', or 'matrix'
+    """
+    # Try ACM1000 endpoint first
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"http://{hostname}/assets/export/config.json"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    devname = data.get("syssta", {}).get("devname", "")
+                    if "ACM1000" in devname:
+                        return "acm1000"
+    except Exception:
+        pass  # Try next endpoint
+
+    # Try ACM200/210 endpoint
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"http://{hostname}/cgi-bin/getjson.cgi?json=mxsta"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    devname = data.get("syssta", {}).get("devname", "")
+                    if "ACM" in devname:
+                        return "acm200"
+    except Exception:
+        pass
+
+    # Try Matrix (older) endpoint
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"http://{hostname}/cgi-bin/getxml.cgi?xml=mxsta"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                if response.status == 200:
+                    return "matrix"
+    except Exception:
+        pass
+
+    # Default to ACM200 if all fail (for backward compatibility)
+    return "acm200"
+
 class Matrix:
 
     def __init__(self, hostname, port):
         self.hostname : str = hostname
         self._multiplex_callback = MultiplexingListener()
-        self._protocol = MatrixProtocol(hostname, port, self._multiplex_callback)
+        self._protocol = MatrixProtocol(hostname, port, self._multiplex_callback, heartbeat_time=60)
         self.outputs_by_id : dict[int, str] = {}
         self.outputs_by_name : dict[str, int] = {}
         self.inputs_by_id : dict[int, str] = {}

@@ -20,6 +20,12 @@ class ACM(Matrix):
     def send_guest_command(self, guest_is_input, guest_id, command):
         return self._protocol.send_guest_command(guest_is_input, guest_id, command)
 
+    def send_macro(self, macro_index: int):
+        """Trigger macro - ACM200/210 may not support this."""
+        if hasattr(self._protocol, 'send_macro'):
+            return self._protocol.send_macro(macro_index)
+        raise NotImplementedError("Macro commands not supported on ACM200/210")
+
     def _process_meta_data(self, metadata_json):
         # Extract required fields
         netsta = metadata_json.get("netsta", {})
